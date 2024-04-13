@@ -32,7 +32,6 @@ fn main() {
         eprintln!("game_map: {:?}", game_map);
 
         let solve_steps = compute_steps(&mut game_map);
-        eprintln!("solve_steps: {:?}", solve_steps);
         for step in solve_steps {
             println!("{}", step);
         }
@@ -51,8 +50,6 @@ Then the program has to output the actions to solve the game, each in a new line
 x y dir +/-, the position of the number that shall be moved, the direction (U,D,R,L) and a + to add the numbers or a - to subtract them.
 */
 fn compute_steps(game_map: &mut Vec<Vec<i32>>) -> Vec<String> {
-    let mut completion_steps = vec![];
-
     let initial_viable_cells = game_map
         .iter()
         .enumerate()
@@ -65,20 +62,22 @@ fn compute_steps(game_map: &mut Vec<Vec<i32>>) -> Vec<String> {
         .collect::<Vec<_>>();
 
     // We need to compute every possible game state
-    for viable_cell in initial_viable_cells.clone() {
+    for _ in initial_viable_cells.clone() {
         let mut game_map_copy = game_map.clone();
-        let (cell_value, x, y) = viable_cell;
 
-        let game_result = get_game_result(&mut game_map_copy, cell_value, x, y);
+        let game_result = get_game_result(&mut game_map_copy);
+        if game_result.0 {
+            return game_result.1;
+        }
     }
 
-    return completion_steps;
+    panic!("No solution found")
 }
 
-fn get_game_result(game_map: &mut Vec<Vec<i32>>, start_cell: (i32, usize, usize)) -> Vec<String> {
+fn get_game_result(game_map: &mut Vec<Vec<i32>>) -> (bool, Vec<String>) {
     let mut completion_steps = vec![];
 
-    let initial_viable_cells = game_map
+    let viable_cells = game_map
         .iter()
         .enumerate()
         .flat_map(|(y, row)| {
@@ -89,62 +88,179 @@ fn get_game_result(game_map: &mut Vec<Vec<i32>>, start_cell: (i32, usize, usize)
         })
         .collect::<Vec<_>>();
 
-    let possible_moves = get_possible_moves(start_cell, initial_viable_cells);
+    if viable_cells.len() == 1 {
+        // eprintln!("[get_game_result] only one viable cell left");
+        return (false, completion_steps);
+    }
+
+    let possible_moves = get_possible_moves(viable_cells);
+
+    if possible_moves.len() == 0 {
+        // eprintln!("[get_game_result] no possible moves left");
+        return (false, completion_steps);
+    }
 
     // Recursively try to solve the game
     for (cell_value_1, x1, y1, cell_value_2, x2, y2) in possible_moves {
-        let mut game_map_copy = game_map.clone();
-        let game_result = get_game_result(&mut game_map_copy, (cell_value_1, x1, y1));
+        let move_direction = if x1 == x2 {
+            if y1 > y2 {
+                "U"
+            } else {
+                "D"
+            }
+        } else {
+            if x1 > x2 {
+                "L"
+            } else {
+                "R"
+            }
+        };
 
-        if game_result.len() > 0 {
-            completion_steps.extend(game_result);
+        // We need to simulate + and - moves
+        for move_sign in vec!["+", "-"] {
+            let mut game_map_copy = game_map.clone();
+            completion_steps = vec![];
+            completion_steps.push(format!("{} {} {} {}", x1, y1, move_direction, move_sign));
+
+            // Perform the move
+            let new_cell_value = if move_sign == "+" {
+                cell_value_2 + cell_value_1
+            } else {
+                i32::abs(cell_value_2 - cell_value_1)
+            };
+            game_map_copy[y2][x2] = new_cell_value;
+            game_map_copy[y1][x1] = 0;
+
+            let game_result = get_game_result(&mut game_map_copy);
+
+            if game_result.1.len() > 0 {
+                completion_steps.extend(game_result.1);
+            }
+
+            if game_result.0 {
+                return (true, completion_steps);
+            }
+
+            // Check if the game_map is 0
+            let is_game_map_empty = game_map_copy
+                .iter()
+                .all(|row| row.iter().all(|&cell| cell == 0));
+
+            if is_game_map_empty {
+                return (true, completion_steps);
+            }
         }
     }
 
-    return completion_steps;
+    return (false, completion_steps);
 }
 
 fn get_possible_moves(
-    current_cell: (i32, usize, usize),
     viable_cells: Vec<(i32, usize, usize)>,
 ) -> Vec<(i32, usize, usize, i32, usize, usize)> {
-    let mut possible_moves = vec![];
-    let (cell_value_1, x1, y1) = current_cell;
-
     // find the possible moves
-    for (cell_value_2, x2, y2) in viable_cells.clone() {
-        // Skip the current cell
-        if x1 == x2 && y1 == y2 {
-            continue;
-        }
-
-        // Make sure that the cell is in reach
-        let x_diff = usize::abs_diff(x1, x2);
-        let y_diff = usize::abs_diff(y1, y2);
-        if x_diff != cell_value_1 as usize && y_diff != cell_value_1 as usize {
-            continue;
-        }
-
-        // Make sure that the cell is in the same row or column
-        if x_diff > 0 && y_diff > 0 {
-            continue;
-        }
-
-        // Make sure that we don't already have this combination, but in reverse
-        let mut already_exists = false;
-        for (_, x1_, y1_, _, x2_, y2_) in possible_moves.clone() {
-            if x1 == x2_ && y1 == y2_ && x2 == x1_ && y2 == y1_ {
-                already_exists = true;
-                break;
+    let mut possible_moves = vec![];
+    for (cell_value_1, x1, y1) in viable_cells.clone() {
+        for (cell_value_2, x2, y2) in viable_cells.clone() {
+            // Skip the current cell
+            if x1 == x2 && y1 == y2 {
+                continue;
             }
-        }
 
-        if already_exists {
-            continue;
-        }
+            // Make sure that the cell is in reach
+            let x_diff = usize::abs_diff(x1, x2);
+            let y_diff = usize::abs_diff(y1, y2);
+            if x_diff != cell_value_1 as usize && y_diff != cell_value_1 as usize {
+                continue;
+            }
 
-        possible_moves.push((cell_value_1, x1, y1, cell_value_2, x2, y2));
+            // Make sure that the cell is in the same row or column
+            if x_diff > 0 && y_diff > 0 {
+                continue;
+            }
+
+            // Make sure that we don't already have this combination, but in reverse
+            let mut already_exists = false;
+            for (_, x1_, y1_, _, x2_, y2_) in possible_moves.clone() {
+                if x1 == x2_ && y1 == y2_ && x2 == x1_ && y2 == y1_ {
+                    already_exists = true;
+                    break;
+                }
+            }
+
+            if already_exists {
+                continue;
+            }
+
+            possible_moves.push((cell_value_1, x1, y1, cell_value_2, x2, y2));
+        }
     }
 
     return possible_moves;
+}
+
+#[test]
+fn test_one() {
+    let mut game_map = vec![
+        vec![0, 0, 0, 4, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 1, 0, 0, 2, 1],
+    ];
+
+    let out = compute_steps(&mut game_map);
+
+    assert_eq!(out, vec!["3 0 D -", "3 4 R -", "6 4 R -"]);
+}
+
+#[test]
+fn test_two() {
+    let mut game_map = vec![
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 2, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+        vec![11, 0, 0, 0, 6, 0, 0, 7],
+    ];
+
+    let out = compute_steps(&mut game_map);
+
+    assert_eq!(out, vec!["4 2 D -", "4 4 L -", "0 4 R -"]);
+}
+
+#[test]
+fn test_three() {
+    let mut game_map = vec![
+        vec![0, 3, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 3, 0, 0, 0, 0, 0, 0],
+        vec![0, 6, 0, 2, 0, 0, 0, 0],
+        vec![0, 2, 0, 0, 0, 0, 0, 0],
+    ];
+
+    let out = compute_steps(&mut game_map);
+
+    assert_eq!(out, vec!["1 0 D -", "3 3 L -", "1 3 U -", "1 2 D -"]);
+}
+
+#[test]
+fn test_four() {
+    let mut game_map = vec![
+        vec![0, 0, 0, 3, 0, 0, 0, 0],
+        vec![4, 0, 0, 0, 1, 0, 0, 3],
+        vec![0, 0, 0, 4, 0, 1, 3, 0],
+        vec![0, 0, 0, 4, 1, 1, 0, 0],
+        vec![0, 0, 2, 0, 1, 0, 0, 0],
+    ];
+
+    let out = compute_steps(&mut game_map);
+
+    assert_eq!(
+        out,
+        vec![
+            "3 0 D -", "0 1 R +", "7 1 L -", "4 1 D -", "5 2 D +", "6 2 L -", "3 2 D +", "3 3 R -",
+            "4 3 D +", "2 4 R -"
+        ]
+    );
 }
